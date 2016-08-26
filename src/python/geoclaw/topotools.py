@@ -788,13 +788,36 @@ class Topography(object):
             
         return num_cells
 
-    def write(self, path, no_data_value=None, topo_type=None, masked=True):
+    def write(self, path, topo_type=None, no_data_value=None, masked=True, 
+                header_style='geoclaw', Z_format="%15.7e"):
         r"""Write out a topography file to path of type *topo_type*.
 
         Writes out a topography file of topo type specified with *topo_type* or
         inferred from the output file's extension, defaulting to 3, to path
         from data in Z.  The rest of the arguments are used to write the header
         data.
+
+        :Input:
+         - *path* (str)  - file to write
+         - *topo_type* (int) - GeoClaw format topo_type 
+           **Note:** this is second positional argument, agreeing with
+           the read function in this class.  It was the third argument in
+           GeoClaw version 5.3.1 and earlier.  
+         - *no_data_value* - values used to indicate missing data
+         - *masked* (bool) - unused??
+         - *header_style* (str) - indicates format of header lines
+             'geoclaw' or 'default'  ==> write value then label 
+             'arcgis' or 'asc' ==> write label then value  
+                        (needed for .asc files in ArcGIS)
+         - *Z_format* (str) - string format to use for Z values
+           The default format "%15.7e" gives at least millimeter precision
+           for topography with abs(Z) < 10000 and results in
+           smaller files than the previous default of "%22.15e" used in
+           GeoClaw version 5.3.1 and earlier.  A shorter format can be used
+           if the user knows there are fewer significant digits, e.g.
+           etopo1 data is integers and so has a resolution of 1 meter.
+           In this case a cropped or coarsened version might be written
+           with `Z_format = "%7i"`, for example.
 
         """
 
@@ -844,41 +867,53 @@ class Topography(object):
         elif topo_type == 2 or topo_type == 3:
             with open(path, 'w') as outfile:
                 # Write out header
-                outfile.write('%6i                              ncols\n' % self.Z.shape[1])
-                outfile.write('%6i                              nrows\n' % self.Z.shape[0])
-                outfile.write('%22.15e              xlower\n' % self.extent[0])
-                outfile.write('%22.15e              ylower\n' % self.extent[2])
-                if abs(self.delta[0] - self.delta[1])/self.delta[0] < 1e-8:
-                    # write only dx in usual case:
-                    outfile.write('%22.15e              cellsize\n' \
-                            % self.delta[0])
+                if header_style in ['geoclaw','default']:
+                    outfile.write('%6i                              ncols\n' % self.Z.shape[1])
+                    outfile.write('%6i                              nrows\n' % self.Z.shape[0])
+                    outfile.write('%22.15e              xlower\n' % self.extent[0])
+                    outfile.write('%22.15e              ylower\n' % self.extent[2])
+                    if abs(self.delta[0] - self.delta[1])/self.delta[0] < 1e-8:
+                        # write only dx in usual case:
+                        outfile.write('%22.15e              cellsize\n' \
+                                % self.delta[0])
+                    else:
+                        # write both dx and dy if they differ:
+                        outfile.write('%22.15e    %22.15e          cellsize\n' \
+                                % (self.delta[0], self.delta[1]))
+                    outfile.write('%10i                          nodata_value\n' % no_data_value)
+                elif header_style in ['arcgis','asc']:
+                    outfile.write('ncols  %6i\n' % self.Z.shape[1])
+                    outfile.write('nrows  %6i\n' % self.Z.shape[0]) 
+                    outfile.write('xlower %22.15e\n' % self.extent[0])
+                    outfile.write('ylower %22.15e\n' % self.extent[2])
+                    outfile.write('cellsize %22.15e\n'  % self.delta[0])
+                    outfile.write('nodata_value  %10i\n' % no_data_value)
                 else:
-                    # write both dx and dy if they differ:
-                    outfile.write('%22.15e    %22.15e          cellsize\n' \
-                            % (self.delta[0], self.delta[1]))
-                outfile.write('%10i                          nodata_value\n' % no_data_value)
+                    raise ValueError("*** Unrecognized header_style")
 
                 masked_Z = isinstance(self.Z, numpy.ma.MaskedArray)
 
                 # Write out topography data
                 if topo_type == 2:
+                    Z_format = Z_format + "\n"
                     if masked_Z:
                         Z_filled = numpy.flipud(self.Z.filled())
                     else:
                         Z_filled = numpy.flipud(self.Z)
                     for i in xrange(self.Z.shape[0]):
                         for j in xrange(self.Z.shape[1]):
-                            outfile.write("%22.15e\n" % Z_filled[i,j])
+                            outfile.write(Z_format % Z_filled[i,j])
                     if masked_Z:
                         del Z_filled
                 elif topo_type == 3:
+                    Z_format = Z_format + " "
                     if masked_Z:
                         Z_flipped = numpy.flipud(self.Z.filled())
                     else:
                         Z_flipped = numpy.flipud(self.Z)
                     for i in xrange(self.Z.shape[0]):
                         for j in xrange(self.Z.shape[1]):
-                            outfile.write("%22.15e   " % (Z_flipped[i,j]))
+                            outfile.write(Z_format % (Z_flipped[i,j]))
                         outfile.write("\n")
                     if masked_Z:
                         del Z_flipped
@@ -1000,7 +1035,7 @@ class Topography(object):
                                                   0.5:[0.8,1.0,0.5],
                                                   1.0:[0.8,0.5,0.2]})
             sea_cmap = plt.get_cmap('Blues_r')
-            if topo_extent[0] > 0.0:
+            if topo_extent[0] >= 0.0:
                 cmap = land_cmap
                 norm = colors.Normalize(vmin=0.0, vmax=topo_extent[1])
             elif topo_extent[1] <= 0.0:
@@ -1393,7 +1428,7 @@ class Topography(object):
                 self.Z[index[0], index[1]] = summation / num_points
 
 
-    def crop(self, filter_region):
+    def crop(self, filter_region=None, coarsen=1):
         r"""Crop region to *filter_region*
 
         Create a new Topography object that is identical to this one but cropped
@@ -1408,6 +1443,10 @@ class Topography(object):
         if self.unstructured:
             raise NotImplemented("*** Cannot currently crop unstructured topo")
 
+        if filter_region is None:
+            # only want to coarsen, so this is entire region:
+            filter_region = [self.x[0],self.x[-1],self.y[0],self.y[-1]]
+
         # Find indices of region
         region_index = [None, None, None, None]
         region_index[0] = (self.x >= filter_region[0]).nonzero()[0][0]
@@ -1416,8 +1455,8 @@ class Topography(object):
         region_index[3] = (self.y <= filter_region[3]).nonzero()[0][-1] + 1
         newtopo = Topography()
 
-        newtopo._x = self._x[region_index[0]:region_index[1]]
-        newtopo._y = self._y[region_index[2]:region_index[3]]
+        newtopo._x = self._x[region_index[0]:region_index[1]:coarsen]
+        newtopo._y = self._y[region_index[2]:region_index[3]:coarsen]
 
         # Force regeneration of 2d coordinate arrays and extent if needed
         newtopo._X = None
@@ -1425,8 +1464,8 @@ class Topography(object):
         newtopo._extent = None
 
         # Modify Z array as well
-        newtopo._Z = self._Z[region_index[2]:region_index[3],
-                          region_index[0]:region_index[1]]
+        newtopo._Z = self._Z[region_index[2]:region_index[3]:coarsen,
+                          region_index[0]:region_index[1]:coarsen]
 
         newtopo.unstructured = self.unstructured
         newtopo.topo_type = self.topo_type

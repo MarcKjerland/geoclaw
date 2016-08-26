@@ -15,6 +15,8 @@ the full 8 digits if you want it transparent).
  - regions2kml - create a kml outline for each regions specified in setrun
  - box2kml - create a kml outline from a rectangular box
  - quad2kml - create a kml outline for an arbitrary quadrilateral
+ - poly2kml - create a kml outline for an arbitrary polygon
+ - line2kml - create a kml line connecting 2 points
  - gauges2kml - create a kml marker for each gauge specified in setrun
  - kml_header - used internally
  - kml_footer - used internally
@@ -37,7 +39,7 @@ def deg2dms(dy):
     return dy_deg,dy_min,dy_sec
 
 
-def regions2kml(rundata=None,fname='regions.kml',verbose=True):
+def regions2kml(rundata=None,fname='regions.kml',verbose=True,combined=True):
 
     """
     Create a KML box for each AMR region specified for a GeoClaw run.
@@ -52,6 +54,13 @@ def regions2kml(rundata=None,fname='regions.kml',verbose=True):
       - *fname* (str) - resulting kml file.
 
       - *verbose* (bool) - If *True*, print out info about each region found
+
+      - *combined* (bool) - If *True*, combine into single kml file with
+        name given by *fname*.  This is the default. 
+        If False, *fname* is ignored and individual files are created for
+        each region with names are Domain.kml, Region00.kml, etc.
+        These will show up separately in GoogleEarth so they can be turned
+        on or off individually.
 
     First create a box for the entire domain (in red) and then a box
     for each region (in white).
@@ -129,7 +138,10 @@ def regions2kml(rundata=None,fname='regions.kml',verbose=True):
         print "Allowing maximum of %i levels" % amr_levels_max
 
     elev = 0.
-    kml_text = kml_header()
+    if not combined:
+        fname = 'Domain.kml'
+
+    kml_text = kml_header(fname)
 
     mapping = {}
     mapping['x1'] = x1
@@ -140,9 +152,20 @@ def regions2kml(rundata=None,fname='regions.kml',verbose=True):
     mapping['name'] = 'Computational Domain'
     mapping['desc'] = description
     mapping['color'] = "0000FF"  # red
+    mapping['width'] = 2
 
     region_text = kml_region(mapping)
     kml_text = kml_text + region_text
+
+    if not combined:
+        kml_text = kml_text + kml_footer()
+        kml_file = open(fname,'w')
+        kml_file.write(kml_text)
+        kml_file.close()
+        if verbose:
+            print "Created ",fname
+
+            
 
     regions = rundata.regiondata.regions
     if len(regions)==0 and verbose:
@@ -150,6 +173,10 @@ def regions2kml(rundata=None,fname='regions.kml',verbose=True):
 
 
     for rnum,region in enumerate(regions):
+        if not combined:
+            fname = 'Region_%s.kml' % str(rnum).zfill(2)
+            kml_text = kml_header(fname)
+
         minlevel,maxlevel = region[0:2]
         t1,t2 = region[2:4]
         x1,x2,y1,y2 = region[4:]
@@ -191,38 +218,55 @@ def regions2kml(rundata=None,fname='regions.kml',verbose=True):
             description = description + levtext
         mapping['desc'] = description
         mapping['color'] = "FFFFFF"  # white
+        mapping['width'] = 3
 
         region_text = kml_region(mapping)
         kml_text = kml_text + region_text
-    kml_text = kml_text + kml_footer()
-    kml_file = open(fname,'w')
-    kml_file.write(kml_text)
-    kml_file.close()
-    if verbose:
-        print "Created ",fname
+        if not combined:
+            kml_text = kml_text + kml_footer()
+            kml_file = open(fname,'w')
+            kml_file.write(kml_text)
+            kml_file.close()
+            if verbose:
+                print "Created ",fname
+
+    if combined:
+        kml_text = kml_text + kml_footer()
+        kml_file = open(fname,'w')
+        kml_file.write(kml_text)
+        kml_file.close()
+        if verbose:
+            print "Created ",fname
 
 
-
-def box2kml(xy,fname='box.kml',name='box',color='FF0000', verbose=True):
+def line2kml(xy,fname='line.kml',name='line',color='00FFFF',width=3,
+             verbose=True):
     """
-    Make a KML box with default color blue.
+    Make a KML line with default color yellow.
 
     :Inputs:
 
-     - *xy* a tuple (x1,x2,y1,y2)
+     - *xy* a tuple ((x1,x2),(y1,y2)) (preferred) 
+            or (x1,x2,y1,y2) (for backward compatibility)
      - *fname* (str) name of resulting kml file
-     - *name* (str) name to appear in box on Google Earth
-     - *color* (str) Color in format aaggbbrr
+     - *name* (str) name to appear on line on Google Earth
+     - *color* (str) Color in format aabbggrr
+     - *width* (str) line width
      - *verbose* (bool) - If *True*, print out info
 
     """
+     
+    if type(xy[0]) is tuple:
+        x1,x2 = xy[0]
+        y1,y2 = xy[1]
+    else:
+        x1,x2,y1,y2 = xy[0:]
 
-    x1,x2,y1,y2 = xy[0:]
     if verbose:
-        print "Box:   %10.6f  %10.6f  %10.6f  %10.6f" % (x1,x2,y1,y2)
+        print "Line:   %10.6f  %10.6f  %10.6f  %10.6f" % (x1,x2,y1,y2)
 
     elev = 0.
-    kml_text = kml_header()
+    kml_text = kml_header(fname)
 
     mapping = {}
     mapping['x1'] = x1
@@ -234,6 +278,60 @@ def box2kml(xy,fname='box.kml',name='box',color='FF0000', verbose=True):
     mapping['desc'] = "  x1 = %g, x2 = %g\n" % (x1,x2) \
             + "  y1 = %g, y2 = %g" % (y1,y2)
     mapping['color'] = color
+    mapping['width'] = width
+
+    region_text = kml_line(mapping)
+
+    kml_text = kml_text + region_text + kml_footer()
+    kml_file = open(fname,'w')
+    kml_file.write(kml_text)
+    kml_file.close()
+    if verbose:
+        print "Created ",fname
+
+
+def box2kml(xy,fname=None,name='box',color='FF0000',width=3,verbose=True):
+    """
+    Make a KML box with default color blue.
+
+    :Inputs:
+
+     - *xy* a tuple ((x1,x2),(y1,y2)) (preferred) 
+            or (x1,x2,y1,y2) (for backward compatibility)
+     - *fname* (str) name of resulting kml file
+     - *name* (str) name to appear in box on Google Earth
+     - *color* (str) Color in format aabbggrr
+     - *width* (str) line width
+     - *verbose* (bool) - If *True*, print out info
+
+    """
+
+    if fname is None:
+        fname = name + '.kml'
+
+    if type(xy[0]) is tuple:
+        x1,x2 = xy[0]
+        y1,y2 = xy[1]
+    else:
+        x1,x2,y1,y2 = xy[0:]
+
+    if verbose:
+        print "Box:   %10.6f  %10.6f  %10.6f  %10.6f" % (x1,x2,y1,y2)
+
+    elev = 0.
+    kml_text = kml_header(fname)
+
+    mapping = {}
+    mapping['x1'] = x1
+    mapping['x2'] = x2
+    mapping['y1'] = y1
+    mapping['y2'] = y2
+    mapping['elev'] = elev
+    mapping['name'] = name
+    mapping['desc'] = "  x1 = %g, x2 = %g\n" % (x1,x2) \
+            + "  y1 = %g, y2 = %g" % (y1,y2)
+    mapping['color'] = color
+    mapping['width'] = width
 
     region_text = kml_region(mapping)
 
@@ -245,21 +343,31 @@ def box2kml(xy,fname='box.kml',name='box',color='FF0000', verbose=True):
         print "Created ",fname
 
 
-def quad2kml(xy,fname='quad.kml',name='quad',color='FF0000', verbose=True):
+def quad2kml(xy,fname=None,name='quad',color='FF0000',width=3,verbose=True):
     """
     Make a KML quadrilateral with default color blue.
 
     :Inputs:
 
-     - *xy* a tuple (x1,y1,x2,y2,x3,y3,x4,y4).
+     - *xy* a tuple ((x1,x2,x3,x4),(y1,y2,y3,y4)) (preferred) 
+            or (x1,x2,y1,y2,x3,y3,x4,y4) (for backward compatibility)
      - *fname* (str) name of resulting kml file
      - *name* (str) name to appear in box on Google Earth
-     - *color* (str) Color in format aaggbbrr
+     - *color* (str) Color in format aabbggrr
+     - *width* (str) line width
      - *verbose* (bool) - If *True*, print out info
 
     """
 
-    x1,y1,x2,y2,x3,y3,x4,y4 = xy[0:]
+    if fname is None:
+        fname = name + '.kml'
+
+    if type(xy[0]) is tuple:
+        x1,x2,x3,x4 = xy[0]
+        y1,y2,y3,y4 = xy[1]
+    else:
+        x1,y1,x2,y2,x3,y3,x4,y4 = xy[0:]
+
     if verbose:
         print "Quadrilateral:   %10.6f  %10.6f" % (x1,y1)
         print "                 %10.6f  %10.6f" % (x2,y2)
@@ -267,7 +375,7 @@ def quad2kml(xy,fname='quad.kml',name='quad',color='FF0000', verbose=True):
         print "                 %10.6f  %10.6f" % (x4,y4)
 
     elev = 0.
-    kml_text = kml_header()
+    kml_text = kml_header(fname)
 
     mapping = {}
     mapping['x1'] = x1
@@ -285,8 +393,68 @@ def quad2kml(xy,fname='quad.kml',name='quad',color='FF0000', verbose=True):
             + "  x3 = %g, y3 = %g" % (x3,y3) \
             + "  x4 = %g, y4 = %g" % (x4,y4)
     mapping['color'] = color
+    mapping['width'] = 3
 
     region_text = kml_region(mapping)
+
+    kml_text = kml_text + region_text + kml_footer()
+    kml_file = open(fname,'w')
+    kml_file.write(kml_text)
+    kml_file.close()
+    if verbose:
+        print "Created ",fname
+
+
+def poly2kml(xy,fname=None,name='poly',color='00FF00', width=3,
+             verbose=True):
+    """
+    Make a KML polygon with default color blue.
+
+    :Inputs:
+
+     - *xy* a tuple (x,y) where x and y are lists of vertices
+     - *fname* (str) name of resulting kml file
+     - *name* (str) name to appear in box on Google Earth
+     - *color* (str) Color in format aabbggrr
+     - *width* (str) line width
+     - *verbose* (bool) - If *True*, print out info
+
+    """
+
+    if fname is None:
+        fname = name + '.kml'
+
+    x,y = xy
+
+    if verbose:
+        print "Polygon:     %10.6f  %10.6f" % (x[0],y[0])
+        for j in range(1,len(x)):
+            print "             %10.6f  %10.6f" % (x[j],y[j])
+
+    elev = 0.
+    kml_text = kml_header(fname)
+
+    mapping = {}
+    mapping['x'] = x
+    mapping['y'] = y
+    mapping['elev'] = elev
+    mapping['name'] = name
+    d = "  x[0] = %g, y[0] = %g\n" % (x[0],y[0]) 
+    for j in range(1,len(x)):
+        d = d + "  x[%i] = %g, y[%i] = %g" % (j,x[j],j,y[j])
+    mapping['desc'] = d
+    mapping['color'] = color
+    mapping['width'] = width
+
+    v = "\n"
+    for j in range(len(x)):
+        v = v + "%g,%g,%g\n" % (x[j],y[j],elev)
+    v = v + "%g,%g,%g\n" % (x[0],y[0],elev)
+    v.replace(' ','')
+    
+    region_text = kml_region(mapping, v)
+    for j in range(1,len(x)):
+        d = d + "  x[%i] = %g, y[%i] = %g" % (j,x[j],j,y[j])
 
     kml_text = kml_text + region_text + kml_footer()
     kml_file = open(fname,'w')
@@ -341,7 +509,7 @@ def gauges2kml(rundata=None, fname='gauges.kml', verbose=True):
             raise IOError("*** cannot execute setrun file")
 
     elev = 0.
-    kml_text = kml_header()
+    kml_text = kml_header(fname)
 
 
     gauges = rundata.gaugedata.gauges
@@ -379,12 +547,11 @@ def gauges2kml(rundata=None, fname='gauges.kml', verbose=True):
 
 
 
-def kml_header():
+def kml_header(name='GeoClaw kml file'):
     header = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
-<Document><name>My document</name>
-<description>Content</description>
-"""
+<Document><name>%s</name>
+""" % name
     return header
 
 def kml_footer():
@@ -394,10 +561,13 @@ def kml_footer():
 """
     return footer
 
-def kml_region(mapping):
-    if mapping.has_key('x3'):
-        # quadrilateral with 4 corners specified
-        region_text = """
+
+def kml_region(mapping, vertex_text=None):
+
+    if vertex_text is None:
+        if mapping.has_key('x3'):
+            # quadrilateral with 4 corners specified
+            vertex_text = """
 {x1:10.4f},{y1:10.4f},{elev:10.4f}
 {x2:10.4f},{y2:10.4f},{elev:10.4f}
 {x3:10.4f},{y3:10.4f},{elev:10.4f}
@@ -405,9 +575,9 @@ def kml_region(mapping):
 {x1:10.4f},{y1:10.4f},{elev:10.4f}
 """.format(**mapping).replace(' ','')
 
-    else:
-        # rectangle with 2 corners specified
-        region_text = """
+        else:
+            # rectangle with 2 corners specified
+            vertex_text = """
 {x1:10.4f},{y1:10.4f},{elev:10.4f}
 {x2:10.4f},{y1:10.4f},{elev:10.4f}
 {x2:10.4f},{y2:10.4f},{elev:10.4f}
@@ -415,13 +585,13 @@ def kml_region(mapping):
 {x1:10.4f},{y1:10.4f},{elev:10.4f}
 """.format(**mapping).replace(' ','')
 
-    mapping['region'] = region_text
+    mapping['vertices'] = vertex_text
     if len(mapping['color'])==6:
         mapping['color'] = 'FF' + mapping['color']
 
     kml_text = """
 <Style id="Path">
-<LineStyle><color>{color:s}</color><width>3</width></LineStyle>
+<LineStyle><color>{color:s}</color><width>{width:d}</width></LineStyle>
 <PolyStyle><color>00000000</color></PolyStyle>
 </Style>
 <Placemark><name>{name:s}</name>
@@ -431,9 +601,40 @@ def kml_region(mapping):
 <tessellate>1</tessellate>
 <altitudeMode>clampToGround</altitudeMode>
 <outerBoundaryIs><LinearRing><coordinates>
-{region:s}
+{vertices:s}
 </coordinates></LinearRing></outerBoundaryIs>
 </Polygon>
+</Placemark>
+""".format(**mapping)
+
+    return kml_text
+
+def kml_line(mapping):
+
+    if len(mapping['color'])==6:
+        mapping['color'] = 'FF' + mapping['color']
+
+        line_text = """
+{x1:10.4f},{y1:10.4f},{elev:10.4f}
+{x2:10.4f},{y2:10.4f},{elev:10.4f}
+""".format(**mapping).replace(' ','')
+
+    mapping['line'] = line_text
+    kml_text = """
+<Style id="Path">
+<LineStyle><color>{color:s}</color><width>{width:d}</width></LineStyle>
+<PolyStyle><color>00000000</color></PolyStyle>
+</Style>
+<Placemark><name>{name:s}</name>
+<description>{desc:s}</description>
+<styleUrl>#Path</styleUrl>
+<LineString>
+<tessellate>1</tessellate>
+<altitudeMode>clampToGround</altitudeMode>
+<coordinates>
+{line:s}
+</coordinates>
+</LineString>
 </Placemark>
 """.format(**mapping)
 
@@ -530,3 +731,71 @@ def kml_timespan(t1,t2,event_time=None,tz=None):
     timestrend = "%s%s" % (time.strftime("%Y-%m-%dT%H:%M:%S", gend),tzstr)
 
     return timestrbegin,timestrend
+
+def topo2kml(topo_file_name, topo_type, color='00FF00'):       
+    """
+    Create a kml file putting a box around the region covered by a topofile.
+    Color is green by default.
+    """
+
+    import os
+    from clawpack.geoclaw import topotools
+    topo = topotools.Topography(topo_file_name, topo_type=topo_type)
+    topo.read_header()
+    xy = topo.extent
+    name = os.path.splitext(os.path.split(topo_file_name)[-1])[0]
+    file_name = '%s.kml' % name
+    box2kml(xy, file_name, name, color)
+
+def dtopo2kml(dtopo_file_name, dtopo_type, color='8888FF'):       
+    """
+    Create a kml file putting a box around the region covered by a dtopofile.
+    Color is pink by default.
+    """
+
+    import os
+    from clawpack.geoclaw import dtopotools
+    dtopo = dtopotools.DTopography()
+    dtopo.read(dtopo_file_name, dtopo_type)
+    x1 = dtopo.x.min()
+    x2 = dtopo.x.max()
+    y1 = dtopo.y.min()
+    y2 = dtopo.y.max()
+    xy = (x1,x2,y1,y2)
+    name = os.path.splitext(os.path.split(dtopo_file_name)[-1])[0]
+    file_name = '%s.kml' % name
+    box2kml(xy, file_name, name, color)
+        
+
+def make_input_data_kmls(rundata):
+    """
+    Produce kml files for the computational domain, all gauges and regions 
+    specified, and all topo and dtopo files specified in rundata.
+    This can be used, e.g. by adding the lines 
+
+        from clawpack.geoclaw import kmltools
+        kmltools.make_input_data_kmls(rundata)
+
+    to the end of a `setrun.py` file so that `make data` will generate all
+    kml files in addition to the `*.data` files.
+    """
+    
+    import os
+    import topotools, dtopotools
+
+    regions2kml(rundata, combined=False)
+    gauges2kml(rundata)
+
+    topofiles = rundata.topo_data.topofiles
+    for f in topofiles:
+        topo_file_name = f[-1]
+        topo_type = f[0]
+        topo2kml(topo_file_name, topo_type)
+        
+    dtopofiles = rundata.dtopo_data.dtopofiles
+    for f in dtopofiles:
+        dtopo_file_name = f[-1]
+        dtopo_type = f[0]
+        dtopo2kml(dtopo_file_name, dtopo_type)
+        
+        

@@ -91,9 +91,18 @@ program amr2
 
     use amr_module, only: t0, tstart_thisrun
 
-    use regions_module, only: set_regions
+    ! Data modules
+    use geoclaw_module, only: set_geo
+    use topo_module, only: read_topo_settings, read_dtopo_settings
+    use qinit_module, only: set_qinit
+    use fixedgrids_module, only: set_fixed_grids
+    use refinement_module, only: set_refinement
+    use storm_module, only: set_storm
+    use friction_module, only: setup_variable_friction
     use gauges_module, only: set_gauges, num_gauges
+    use regions_module, only: set_regions
     use fgmax_module, only: set_fgmax, FG_num_fgrids
+    use multilayer_module, only: set_multilayer
 
     implicit none
 
@@ -104,7 +113,6 @@ program amr2
     integer :: omp_get_max_threads, maxthreads
     real(kind=8) :: time, ratmet, cut, dtinit, dt_max
     logical :: vtime, rest, output_t0    
-    integer :: num_fgmax
 
     ! Timing variables
     integer :: clock_start, clock_finish, clock_rate, ttotal
@@ -165,7 +173,7 @@ program amr2
         read(inunit,*) nout
         allocate(tout(nout))
         read(inunit,*) (tout(i), i=1,nout)
-        output_t0 = (tout(1) == t0)
+        output_t0 = (abs(tout(1) - t0) < 1e-15)
         ! Move output times down one index
         if (output_t0) then
             nout = nout - 1
@@ -295,12 +303,12 @@ program amr2
         ! Never checkpoint:
         checkpt_interval = iinfinity
 
-    else if (checkpt_style == 2) then
+    else if (abs(checkpt_style) == 2) then
         read(inunit,*) nchkpt
         allocate(tchk(nchkpt))
         read(inunit,*) (tchk(i), i=1,nchkpt)
 
-    else if (checkpt_style == 3) then
+    else if (abs(checkpt_style) == 3) then
         ! Checkpoint every checkpt_interval steps on coarse grid
         read(inunit,*) checkpt_interval
     endif
@@ -367,13 +375,6 @@ program amr2
     close(inunit)
     ! Finished with reading in parameters
     ! ==========================================================================
-
-    ! Read in region and gauge data
-    call set_regions('regions.data')
-    call set_gauges(rest,'gauges.data')
-
-    ! New fixed grid routines to keep track of max over computation:
-    call set_fgmax('fgmax.data')
 
     ! Look for capacity function via auxtypes:
     mcapa = 0
@@ -458,6 +459,20 @@ program amr2
         ! Call user routine to set up problem parameters:
         call setprob()
 
+        ! Non-user defined setup routine
+        call set_geo()                    ! sets basic parameters g and coord system
+        call set_refinement()             ! sets refinement control parameters
+        call read_dtopo_settings()        ! specifies file with dtopo from earthquake
+        call read_topo_settings()         ! specifies topography (bathymetry) files
+        call set_qinit()                  ! specifies file with dh if this used instead
+        call set_fixed_grids()            ! Fixed grid settings
+        call setup_variable_friction()    ! Variable friction parameter
+        call set_multilayer()             ! Set multilayer SWE parameters
+        call set_storm()                  ! Set storm parameters
+        call set_regions()                ! Set refinement regions
+        call set_gauges(rest, nvar)       ! Set gauge output
+        call set_fgmax()
+
     else
 
         open(outunit, file=outfile, status='unknown', form='formatted')
@@ -466,6 +481,20 @@ program amr2
 
         ! Call user routine to set up problem parameters:
         call setprob()
+
+        ! Non-user defined setup routine
+        call set_geo()                    ! sets basic parameters g and coord system
+        call set_refinement()             ! sets refinement control parameters
+        call read_dtopo_settings()        ! specifies file with dtopo from earthquake
+        call read_topo_settings()         ! specifies topography (bathymetry) files
+        call set_qinit()                  ! specifies file with dh if this used instead
+        call set_fixed_grids()            ! Fixed grid settings
+        call setup_variable_friction()    ! Variable friction parameter
+        call set_multilayer()             ! Set multilayer SWE parameters
+        call set_storm()                  ! Set storm parameters
+        call set_regions()                ! Set refinement regions
+        call set_gauges(rest, nvar)       ! Set gauge output
+        call set_fgmax()
 
         cflmax = 0.d0   ! otherwise use previously heckpointed val
 
@@ -618,12 +647,12 @@ program amr2
              real(tvoll(level),kind=8) / real(clock_rate,kind=8), tvollCPU(level), rvoll(level)
         write(*,format_string) level, &
              real(tvoll(level),kind=8) / real(clock_rate,kind=8), tvollCPU(level), rvoll(level)
-    	ttotalcpu=ttotalcpu+tvollCPU(level)
-    	ttotal=ttotal+tvoll(level)
+        ttotalcpu=ttotalcpu+tvollCPU(level)
+        ttotal=ttotal+tvoll(level)
     end do
     
     format_string="('total         ',1f15.3,'        ',1f15.3,'    ', e17.3)"
-	write(outunit,format_string) &
+    write(outunit,format_string) &
              real(ttotal,kind=8) / real(clock_rate,kind=8), ttotalCPU, rvol
     write(*,format_string) &
              real(ttotal,kind=8) / real(clock_rate,kind=8), ttotalCPU, rvol
@@ -655,16 +684,16 @@ program amr2
     !regridding time
     format_string="('Regridding    ',1f15.3,'        ',1f15.3,'  ')"
     write(outunit,format_string) &
-    		real(timeRegridding,kind=8) / real(clock_rate,kind=8), timeRegriddingCPU
+            real(timeRegridding,kind=8) / real(clock_rate,kind=8), timeRegriddingCPU
     write(*,format_string) &
-    		real(timeRegridding,kind=8) / real(clock_rate,kind=8), timeRegriddingCPU
+            real(timeRegridding,kind=8) / real(clock_rate,kind=8), timeRegriddingCPU
     
     !output time
     format_string="('Output (valout)',1f14.3,'        ',1f15.3,'  ')"
     write(outunit,format_string) &
-    		real(timeValout,kind=8) / real(clock_rate,kind=8), timeValoutCPU
+            real(timeValout,kind=8) / real(clock_rate,kind=8), timeValoutCPU
     write(*,format_string) &
-    		real(timeValout,kind=8) / real(clock_rate,kind=8), timeValoutCPU
+            real(timeValout,kind=8) / real(clock_rate,kind=8), timeValoutCPU
     
     write(*,*)
     write(outunit,*)
@@ -672,11 +701,11 @@ program amr2
     !Total Time
     format_string="('Total time:   ',1f15.3,'        ',1f15.3,'  ')"
     write(outunit,format_string) &
-    		real(clock_finish - clock_start,kind=8) / real(clock_rate,kind=8), &
-    		cpu_finish-cpu_start
+            real(clock_finish - clock_start,kind=8) / real(clock_rate,kind=8), &
+            cpu_finish-cpu_start
     write(*,format_string) &
-    		real(clock_finish - clock_start,kind=8) / real(clock_rate,kind=8), &
-    		cpu_finish-cpu_start
+            real(clock_finish - clock_start,kind=8) / real(clock_rate,kind=8), &
+            cpu_finish-cpu_start
     
     format_string="('Using',i3,' thread(s)')"
     write(outunit,format_string) maxthreads
