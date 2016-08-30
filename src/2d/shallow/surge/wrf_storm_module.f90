@@ -138,7 +138,10 @@ contains
         ! by reading the first line and 
         ! counting the decimal points
         read( l_file, '( a )',iostat=io_status) dummy_line
-        num_lons = count( [ ( dummy_line( i:i ), i = 1, len( dummy_line ) ) ] == '.' )
+        !!!!!!!! THIS LINE CAUSES SUPER SLOW COMPILE
+        !num_lons = count( [ ( dummy_line( i:i ), i = 1, len( dummy_line ) ) ] == '.' )
+        ! but using len_trim() seems to fix it
+        num_lons = count( [ ( dummy_line( i:i ), i = 1, len_trim( dummy_line ) ) ] == '.' )
         storm%num_lons = num_lons
 
         ! Count number of data rows
