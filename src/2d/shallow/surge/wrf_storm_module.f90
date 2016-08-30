@@ -101,7 +101,8 @@ contains
         character(len=100) :: storm_data_path
 
         ! Reading buffer variables
-        character(len=20000) :: dummy_line
+        character(len=100) :: dummy_read
+        integer :: readsize
 
         ! Storm type only works on lat-long coordinate systems
         if (coordinate_system /= 2) then
@@ -135,17 +136,26 @@ contains
         endif            
 
         ! Count number of data columns
-        ! by reading the first line and 
-        ! counting the decimal points
-        read( l_file, '( a )',iostat=io_status) dummy_line
-        !!!!!!!! THIS LINE CAUSES SUPER SLOW COMPILE
-        !num_lons = count( [ ( dummy_line( i:i ), i = 1, len( dummy_line ) ) ] == '.' )
-        ! but using len_trim() seems to fix it
-        num_lons = count( [ ( dummy_line( i:i ), i = 1, len_trim( dummy_line ) ) ] == '.' )
+        num_lons = 0
+        do ! incremental read of lat file
+            ! Read a chunk of the first line
+            read(l_file,'(A)', ADVANCE='NO', SIZE=readsize, iostat=io_status) dummy_read
+            ! Count number of entries in first record (using . as proxy)
+            do i = 1, readsize ! equal to len(dummy_read) unless EOR reached
+                if ( dummy_read(i:i) == '.'  ) Then
+                    num_lons = num_lons + 1
+                endif
+            end do
+            ! Exit loop if we ran into EOR or EOF
+            if (io_status /= 0) then
+                exit
+            endif
+        end do
         storm%num_lons = num_lons
 
         ! Count number of data rows
-        num_lats = 1
+        rewind(l_file) 
+        num_lats = 0
         do
             read (l_file, *, iostat=io_status)
             ! Exit loop if we ran into an error or we reached the end of the file
@@ -291,23 +301,23 @@ contains
     !    Opens storm data file and reads next storm entry
     !    Currently only for ASCII file
     ! ==========================================================================
-    subroutine read_wrf_storm_file(data_path,file_unit,storm_array,num_lats,last_storm_index,timestamp)
+    subroutine read_wrf_storm_file(data_path,storm_array,num_lats,last_storm_index,timestamp)
 
         implicit none
 
         ! Subroutine I/O
         real(kind=8), intent(in out) :: storm_array(:,:)
-        !real(kind=8), intent(in) :: t
         character(len=*), intent(in) :: data_path
-        integer, intent(in) :: file_unit,num_lats, last_storm_index
+        integer, intent(in) :: num_lats, last_storm_index
         integer, intent(inout) :: timestamp
 
         ! Local storage
         integer :: j, k, iostatus
+        integer, parameter :: data_file = 701
 
         ! Open the input file
         !
-        open(unit=file_unit,file=data_path,status='old', &
+        open(unit=data_file,file=data_path,status='old', &
                 action='read',iostat=iostatus)
         if (iostatus /= 0) then
             print *, "Error opening data file: ",data_path
@@ -318,7 +328,7 @@ contains
         ! Skip entries based on total number previously read
         do k = 1, last_storm_index
             do j = 1, num_lats
-                read(file_unit, *, iostat=iostatus)
+                read(data_file, *, iostat=iostatus)
                 ! Exit loop if we ran into an error or we reached the end of the file
                 if (iostatus /= 0) then
                     print *, "Unexpected end-of-file reading ",data_path
@@ -330,7 +340,7 @@ contains
         enddo
         ! Read in next time snapshot 
         do j = 1, num_lats
-            read(file_unit, *, iostat=iostatus) timestamp, storm_array(:,j) 
+            read(data_file, *, iostat=iostatus) timestamp, storm_array(:,j) 
             ! Exit loop if we ran into an error or we reached the end of the file
             if (iostatus /= 0) then
                 print *, "Unexpected end-of-file reading ",data_path
@@ -339,7 +349,7 @@ contains
                 return
             endif
         enddo
-        close(file_unit)
+        close(data_file) 
 
         timestamp = ymdh_to_seconds(timestamp)
 
@@ -378,7 +388,7 @@ contains
 
         ! Read the u-velocity file
         data_path = trim(storm%data_path_root) // "u10.dat"
-        call read_wrf_storm_file(data_path,702,storm%u_next,storm%num_lats,storm%last_storm_index,timestamp)
+        call read_wrf_storm_file(data_path,storm%u_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
             storm%u_next = 0
@@ -390,7 +400,7 @@ contains
 
         ! Read v-velocity file
         data_path = trim(storm%data_path_root) // "v10.dat"
-        call read_wrf_storm_file(data_path,703,storm%v_next,storm%num_lats,storm%last_storm_index,timestamp)
+        call read_wrf_storm_file(data_path,storm%v_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
             storm%v_next = 0
@@ -398,7 +408,7 @@ contains
 
         ! Read pressure file
         data_path = trim(storm%data_path_root) // "pmsl.dat"
-        call read_wrf_storm_file(data_path,704,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
+        call read_wrf_storm_file(data_path,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
             storm%p_next = storm%ambient_pressure
