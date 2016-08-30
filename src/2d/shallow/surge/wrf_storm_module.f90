@@ -303,7 +303,7 @@ contains
         integer, intent(inout) :: timestamp
 
         ! Local storage
-        integer :: j, k, file_unit, iostatus
+        integer :: j, k, iostatus
 
         ! Open the input file
         !
