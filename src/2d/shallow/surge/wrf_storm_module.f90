@@ -297,6 +297,44 @@ contains
     end function ymdh_to_seconds
 
     ! ==========================================================================
+    !  wrf_storm_location(t,storm)
+    !    Returns location of hurricane at the current time
+    ! ==========================================================================
+    function wrf_storm_location(t,storm) result(location)
+
+        use amr_module, only: rinfinity
+
+        implicit none
+
+        ! Input
+        real(kind=8), intent(in) :: t
+        type(wrf_storm_type), intent(in out) :: storm
+
+        ! Output
+        real(kind=8) :: location(2)
+
+        ! Local storage
+        real(kind=8) :: alpha
+        integer :: eye(2)
+
+        ! Estimate location based on two nearest snapshots 
+
+        if ((t < storm%t_prev) .OR. (t > storm%t_next)) then
+            location = [rinfinity,rinfinity]
+        else
+            ! Determine the linear interpolation parameter (in time)
+            alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+            ! Estimate location index of storm center at time t
+            eye = storm%eye_prev + NINT((storm%eye_next - storm%eye_prev) * alpha)
+            ! Convert to lat-lon
+            location(1) = storm%lon(eye(1))
+            location(2) = storm%lat(eye(2))
+        endif
+
+
+    end function wrf_storm_location
+
+    ! ==========================================================================
     !  read_wrf_storm_data_file()
     !    Opens storm data file and reads next storm entry
     !    Currently only for ASCII file
@@ -444,16 +482,10 @@ contains
         real(kind=8) :: dy
 
         ! Out-of-bound conditions:
-        !  error messages omitted to optimize performace
-        !  (pure function specification)
         if (lat < storm%lat(1)) then
             i = 1
-            !print *, "Warning: latitude ", lat, " out of bounds. Using ", &
-                !storm%lat(1), " instead."
         else if (lat > storm%lat(storm%num_lats)) then
             i = storm%num_lats
-            !print *, "Warning: latitude ", lat, " out of bounds. Using ", &
-                !storm%lat(storm%num_lats), " instead."
         else
             ! Find spacing between latitude values
             dy = (storm%lat(storm%num_lats) - storm%lat(1)) / storm%num_lats
@@ -465,7 +497,7 @@ contains
 
     ! ==========================================================================
     !  integer pure get_lon_index(lon)
-    !    Returns index of lontitude array of the storm data
+    !    Returns index of longitude array of the storm data
     !    corresponding to input lon.
     ! ==========================================================================
     pure integer function get_lon_index(lon,storm) result(i)
@@ -480,16 +512,10 @@ contains
         real(kind=8) :: dx
 
         ! Out-of-bound conditions:
-        !  no error messages generated to optimize performace
-        !  (pure function specification)
         if (lon < storm%lon(1)) then
             i = 1
-            !print *, "Warning: Longitude ", lon, " out of bounds. Using ", &
-                !storm%lon(1), " instead."
         else if (lon > storm%lon(storm%num_lons)) then
             i = storm%num_lons
-            !print *, "Warning: Longitude ", lon, " out of bounds. Using ", &
-                !storm%lon(storm%num_lons), " instead."
         else
             ! Find spacing between longitude values
             dx = (storm%lon(storm%num_lons) - storm%lon(1)) / storm%num_lons
