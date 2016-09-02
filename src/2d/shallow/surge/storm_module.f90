@@ -343,6 +343,7 @@ contains
 
         use holland_storm_module, only: holland_storm_location
         use constant_storm_module, only: constant_storm_location
+        use wrf_storm_module, only: wrf_storm_location
 
         implicit none
 
@@ -361,6 +362,8 @@ contains
                 location = constant_storm_location(t,constant_storm)
             case(3)
                 location = [rinfinity,rinfinity]
+            case(4)
+                location = wrf_storm_location(t,wrf_storm)
         end select
 
     end function storm_location
@@ -384,6 +387,8 @@ contains
             case(2)
                 theta = constant_storm_direction(t,constant_storm)
             case(3)
+                theta = rinfinity
+            case(4)
                 theta = rinfinity
         end select
 
