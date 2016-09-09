@@ -319,18 +319,26 @@ contains
 
         ! Estimate location based on two nearest snapshots 
 
+        ! If no data at this time, return infinity
         if ((t < storm%t_prev) .OR. (t > storm%t_next)) then
             location = [rinfinity,rinfinity]
         else
-            ! Determine the linear interpolation parameter (in time)
-            alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
-            ! Estimate location index of storm center at time t
-            eye = storm%eye_prev + NINT((storm%eye_next - storm%eye_prev) * alpha)
+            ! Otherwise check if there is a low pressure system
+            !  and if so interpolate eye location from snapshots
+            if (storm%eye_prev(1) == 0) then
+                eye = storm%eye_next
+            else if (storm%eye_next(1) == 0) then
+                eye = storm%eye_prev
+            else
+                ! Determine the linear interpolation parameter (in time)
+                alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+                ! Estimate location index of storm center at time t
+                eye = storm%eye_prev + NINT((storm%eye_next - storm%eye_prev) * alpha)
+            endif
             ! Convert to lat-lon
             location(1) = storm%lon(eye(1))
             location(2) = storm%lat(eye(2))
         endif
-
 
     end function wrf_storm_location
 
@@ -410,6 +418,7 @@ contains
         ! Local storage
         integer :: j, k
         character(len=100) :: data_path
+        real(kind=8) :: lowest_p
 
         ! Reading buffer variables
         integer :: timestamp
@@ -450,13 +459,19 @@ contains
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
             storm%p_next = storm%ambient_pressure
+            storm%eye_next(1) = 0
+            storm%eye_next(2) = 0
         else
             ! Convert pressure units: mbar to Pa
             storm%p_next = storm%p_next * 1.0e2
-            ! Estimate storm center location 
-            !  based on lowest pressure
+            ! Estimate storm center location based on lowest pressure
             ! (only the array index is saved)
             storm%eye_next = MINLOC(storm%p_next)
+            ! If no clear low pressure area, set storm center to 0 instead
+            lowest_p = storm%p_next(storm%eye_next(1),storm%eye_next(2))
+            if (lowest_p > storm%ambient_pressure*0.99) then
+                storm%eye_next = [0,0]
+            endif
         endif
 
         ! Update number of storm snapshots read in
@@ -541,21 +556,24 @@ contains
         type(wrf_storm_type), intent(in out) :: storm
 
         ! Local storage
-        real(kind=8) :: t_interp
-
+        real(kind=8) :: alpha
 
         ! This is just a simple weighted average.
         ! Note that this might not be the best approach:
         !  intensity is smoothed out between intervals
         !  so intermediate values may appear less intense
         ! For a more realistic storm field, use storm_shift_interp()
-        t_interp = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+
+        ! Determine the linear interpolation parameter (in time)
+        alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+
+        ! Take weighted average of two storm fields
         storm%u = storm%u_prev + &
-                (storm%u_next - storm%u_prev) * t_interp
+                (storm%u_next - storm%u_prev) * alpha
         storm%v = storm%v_prev + &
-                (storm%v_next - storm%v_prev) * t_interp
+                (storm%v_next - storm%v_prev) * alpha
         storm%p = storm%p_prev + &
-                (storm%p_next - storm%p_prev) * t_interp
+                (storm%p_next - storm%p_prev) * alpha
 
     end subroutine storm_interpolate
 
@@ -658,7 +676,12 @@ contains
         if (t > storm%t) then
             !$OMP CRITICAL (INTERP_STORM)
             if (t > storm%t) then
-                call storm_shift_interp(storm)
+                ! Check to see if there's actually a storm. If not, then don't shift.
+                if (storm%eye_prev(1) == 0 .or. storm%eye_next(1) == 0) then
+                    call storm_interpolate(storm)
+                else
+                    call storm_shift_interp(storm)
+                endif
                 storm%t = t
             endif
             !$OMP END CRITICAL (INTERP_STORM)
