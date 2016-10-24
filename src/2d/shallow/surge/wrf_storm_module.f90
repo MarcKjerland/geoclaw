@@ -69,7 +69,7 @@ module wrf_storm_module
         real(kind=8) :: rho_air = 1.3d0
 
         ! Store the storm data file for repeated reading
-        character(len=90) :: data_path_root
+        character(len=4096) :: data_path_root
 
     end type wrf_storm_type
 
@@ -96,9 +96,8 @@ contains
 
         ! Local storage
         integer, parameter :: l_file = 701
-        integer :: i, j, k, io_status, num_lats, num_lons
-        real(kind=8) :: forecast_time,last_time,x(2),y(2),ds,dt,dx,dy
-        character(len=100) :: storm_data_path
+        integer :: i, j, io_status, num_lats, num_lons
+        character(len=4096) :: storm_data_path
 
         ! Reading buffer variables
         character(len=100) :: dummy_read
@@ -108,9 +107,6 @@ contains
         if (coordinate_system /= 2) then
             stop "explicit storm type does only works on lat-long coordinates."
         endif
-
-        ! Not properly set in module declaration
-        storm%ambient_pressure = 101.3d3 ! 101300 Pascals
 
         ! We need to count two things:
         !   number of latitude coords (ny)
@@ -127,7 +123,7 @@ contains
             storm%data_path_root = './'
         endif
         storm_data_path = trim(storm%data_path_root) // "lat.dat"
-        print *,'Reading latitudes data file ',storm_data_path
+        print *,'Reading latitudes data file ',trim(storm_data_path)
         open(unit=l_file,file=storm_data_path,status='old', &
                 action='read',iostat=io_status)
         if (io_status /= 0) then
@@ -188,9 +184,13 @@ contains
         end do
         close(l_file)
 
+        ! TEMPORARY
+        ! want to shift the storm to match BT data
+        !storm%lat = storm%lat + 0.3
+
         ! Open longitudes data file
         storm_data_path = trim(storm%data_path_root) // "lon.dat"
-        print *,'Reading longitudes data file ',storm_data_path
+        print *,'Reading longitudes data file ',trim(storm_data_path)
         open(unit=l_file,file=storm_data_path,status='old', &
                 action='read',iostat=io_status)
         if (io_status /= 0) then
@@ -210,10 +210,12 @@ contains
 
         if (t0 < storm%t_next) then
             print *, "Simulation start time preceeds storm data. Using clear skies."
-            print *, "t0=", t0, "first storm t:",storm%t_next
+            if (DEBUG) print *, "t0=", t0, "first storm t:",storm%t_next
             storm%t_prev = t0
             storm%u_prev = 0
             storm%v_prev = 0
+            ! Ambient pressure may not be properly set in parallel
+            storm%ambient_pressure = 101.3d3 ! 101300 Pascals
             storm%p_prev = storm%ambient_pressure
             storm%eye_prev = storm%eye_next
         else
@@ -366,7 +368,7 @@ contains
         open(unit=data_file,file=data_path,status='old', &
                 action='read',iostat=iostatus)
         if (iostatus /= 0) then
-            print *, "Error opening data file: ",data_path
+            print *, "Error opening data file: ",trim(data_path)
             print *, "Status = ", iostatus
             stop 
         endif            
@@ -377,9 +379,12 @@ contains
                 read(data_file, *, iostat=iostatus)
                 ! Exit loop if we ran into an error or we reached the end of the file
                 if (iostatus /= 0) then
-                    print *, "Unexpected end-of-file reading ",data_path
+                    print *, "Unexpected end-of-file reading ",trim(data_path)
                     print *, "Status = ", iostatus
+                    if (DEBUG) print *, "k, laststormindex = ", k, last_storm_index
+                    if (DEBUG) print *, "j, num_lats = ", j, num_lats
                     timestamp = -1
+                    close(data_file) 
                     return
                 endif
             enddo
@@ -389,9 +394,12 @@ contains
             read(data_file, *, iostat=iostatus) timestamp, storm_array(:,j) 
             ! Exit loop if we ran into an error or we reached the end of the file
             if (iostatus /= 0) then
-                print *, "Unexpected end-of-file reading ",data_path
+                print *, "Unexpected end-of-file reading ",trim(data_path)
                 print *, "Status = ", iostatus
+                if (DEBUG) print *, "j, num_lats = ", j, num_lats
+                !if (DEBUG) print *, "storm_array(:,",j,") = ", storm_array(:,j) 
                 timestamp = -1
+                close(data_file) 
                 return
             endif
         enddo
@@ -416,8 +424,7 @@ contains
         real(kind=8), intent(in) :: t
 
         ! Local storage
-        integer :: j, k
-        character(len=100) :: data_path
+        character(len=4096) :: data_path
         real(kind=8) :: lowest_p
 
         ! Reading buffer variables
@@ -458,9 +465,14 @@ contains
         call read_wrf_storm_file(data_path,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
-            storm%p_next = storm%ambient_pressure
-            storm%eye_next(1) = 0
-            storm%eye_next(2) = 0
+            !storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
+            storm%p_next = 101.3d3 ! workaround 
+            !if (DEBUG) print *, "ambient pressure = ", storm%ambient_pressure
+            !if (DEBUG) print *, "shape(p_next) = ", shape(storm%p_next) 
+            !if (DEBUG) print *, "shape(ambient_pressure) = ", shape(storm%ambient_pressure) 
+            !if (DEBUG) print *, "shape(timestamp) = ", shape(timestamp) 
+            !if (DEBUG) print *, "p_next(:,:) = ", storm%p_next(:,:) 
+            storm%eye_next = [0,0]
         else
             ! Convert pressure units: mbar to Pa
             storm%p_next = storm%p_next * 1.0e2
@@ -701,6 +713,8 @@ contains
                 ! Set pressure field
                 aux(pressure_index,i,j) = storm%p(l,k)
                 ! Set velocity components of storm 
+                !aux(wind_index,i,j)   = storm%u(l,k) * 1.38 ! TEMPORARY!
+                !aux(wind_index+1,i,j) = storm%v(l,k) * 1.38 ! TEMPORARY!
                 aux(wind_index,i,j)   = storm%u(l,k)
                 aux(wind_index+1,i,j) = storm%v(l,k)
             enddo
