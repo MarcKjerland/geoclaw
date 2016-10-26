@@ -77,6 +77,10 @@ module wrf_storm_module
     logical, private :: DEBUG = .true. 
     !logical, private :: DEBUG = .false. 
 
+    ! Tolerance for floating point inequalities
+    real(kind=8), parameter :: eps = 1.0e-8 
+
+
 contains
 
     ! Setup routine for the WRF storm model
@@ -208,9 +212,10 @@ contains
         !  and increment storm%last_storm_index to 1
         call read_wrf_storm(storm,t0)
 
-        if (t0 < storm%t_next) then
-            print *, "Simulation start time preceeds storm data. Using clear skies."
+        if (t0 < storm%t_next - eps) then
+            print *, "Simulation start time precedes storm data. Using clear skies."
             if (DEBUG) print *, "t0=", t0, "first storm t:",storm%t_next
+            print *, "t0=", t0, "first storm t:",storm%t_next
             storm%t_prev = t0
             storm%u_prev = 0
             storm%v_prev = 0
@@ -322,7 +327,7 @@ contains
         ! Estimate location based on two nearest snapshots 
 
         ! If no data at this time, return infinity
-        if ((t < storm%t_prev) .OR. (t > storm%t_next)) then
+        if ((t < storm%t_prev - eps) .OR. (t > storm%t_next + eps)) then
             location = [rinfinity,rinfinity]
         else
             ! Otherwise check if there is a low pressure system
@@ -403,9 +408,9 @@ contains
                 return
             endif
         enddo
-        close(data_file) 
 
         timestamp = ymdh_to_seconds(timestamp)
+        close(data_file) 
 
     end subroutine read_wrf_storm_file
 
@@ -479,7 +484,7 @@ contains
             ! Estimate storm center location based on lowest pressure
             ! (only the array index is saved)
             storm%eye_next = MINLOC(storm%p_next)
-            ! If no clear low pressure area, set storm center to 0 instead
+            ! If no obvious low pressure area, set storm center to 0 instead
             lowest_p = storm%p_next(storm%eye_next(1),storm%eye_next(2))
             if (lowest_p > storm%ambient_pressure*0.99) then
                 storm%eye_next = [0,0]
@@ -666,15 +671,15 @@ contains
         real(kind=8) :: x, y
         integer :: i,j,k,l
 
-        if (t < storm%t_prev) then
+        if (t < storm%t_prev - eps) then
             print *, "Simulation time precedes storm data in memory."
             print *, "t=",t,"< t_prev=",storm%t_prev,"t_next=",storm%t_next
         endif
 
-        if (t > storm%t_next) then
+        if (t > storm%t_next + eps) then
             ! Load two snapshots into memory, at times t_next and t_prev
             !$OMP CRITICAL (READ_STORM)
-            do while (t > storm%t_next)
+            do while (t > storm%t_next + eps)
             ! update all storm data, including value of t_next
                 if (DEBUG) print *,"loading new storm snapshot ","t=",t,"t_next=",storm%t_next
                 call read_wrf_storm(storm,t)
@@ -685,10 +690,12 @@ contains
         
         ! Interpolate storm data in time
         ! t_prev <= t <= t_next
-        if (t > storm%t) then
+        if (t > storm%t + eps) then
             !$OMP CRITICAL (INTERP_STORM)
-            if (t > storm%t) then
-                ! Check to see if there's actually a storm. If not, then don't shift.
+            if (t > storm%t + eps) then
+                ! Check to see if there's actually a storm. 
+                ! If not, interpolate in place.
+                ! If so, shift storm snapshots then interpolate. 
                 if (storm%eye_prev(1) == 0 .or. storm%eye_next(1) == 0) then
                     call storm_interpolate(storm)
                 else
