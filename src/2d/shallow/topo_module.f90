@@ -552,7 +552,7 @@ contains
                 ! Load in data
                 ! TODO: Provide striding into data if need be
                 ! TODO: Only grab section of data within the domain
-                row_index = mx + 1
+                row_index = my + 1
                 do j=1, my
                     row_index = row_index - 1
                     call check_netcdf_error(nf90_get_var(root_id, z_var_id,  &

@@ -188,10 +188,6 @@ contains
         end do
         close(l_file)
 
-        ! TEMPORARY
-        ! want to shift the storm to match BT data
-        !storm%lat = storm%lat + 0.3
-
         ! Open longitudes data file
         storm_data_path = trim(storm%data_path_root) // "lon.dat"
         print *,'Reading longitudes data file ',trim(storm_data_path)
@@ -205,29 +201,43 @@ contains
         read (l_file, *, iostat=io_status) storm%lon
         close(l_file)
 
+        ! TEMPORARY
+        ! want to shift the storm to match BT data
+        !storm%lat = storm%lat + 0.3
+        storm%lat = storm%lat + 0.2
+        storm%lon = storm%lon + 0.15
+
         ! This is used to speed up searching for correct storm data
+        !  (using ASCII datafiles)
         storm%last_storm_index = 0
 
-        ! Read in the first storm data snapshot
+        ! Read in the first storm data snapshot as 'next'
         !  and increment storm%last_storm_index to 1
         call read_wrf_storm(storm,t0)
 
+        ! Check if starting time of simulation
+        !  is before the first storm data snapshot
         if (t0 < storm%t_next - eps) then
             print *, "Simulation start time precedes storm data. Using clear skies."
             if (DEBUG) print *, "t0=", t0, "first storm t:",storm%t_next
-            print *, "t0=", t0, "first storm t:",storm%t_next
             storm%t_prev = t0
             storm%u_prev = 0
             storm%v_prev = 0
             ! Ambient pressure may not be properly set in parallel
-            storm%ambient_pressure = 101.3d3 ! 101300 Pascals
+            !storm%ambient_pressure = 101.3d3 ! 101300 Pascals
             storm%p_prev = storm%ambient_pressure
             storm%eye_prev = storm%eye_next
         else
-            ! Read in the second storm data snapshot
+            ! Read in the second storm data snapshot as 'next',
+            !  update 'prev' with old 'next' data,
             !  and increment storm%last_storm_index to 2
             call read_wrf_storm(storm,t0)
         endif
+
+        ! Initialize current storm module data
+        storm%t = t0
+        ! Interpolate wind & pressure fields using prev and next snapshots
+        call storm_interpolate(storm)
 
     end subroutine set_wrf_storm
 
@@ -329,6 +339,8 @@ contains
         ! If no data at this time, return infinity
         if ((t < storm%t_prev - eps) .OR. (t > storm%t_next + eps)) then
             location = [rinfinity,rinfinity]
+        else if ((storm%eye_prev(1) == 0) .AND. (storm%eye_next(1) == 0)) then
+            location = [rinfinity,rinfinity]
         else
             ! Otherwise check if there is a low pressure system
             !  and if so interpolate eye location from snapshots
@@ -338,7 +350,13 @@ contains
                 eye = storm%eye_prev
             else
                 ! Determine the linear interpolation parameter (in time)
-                alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+                if (storm%t_next-storm%t_prev < eps) then
+                    print *, "t_next = ", storm%t_next,"t_prev = ", storm%t_prev
+                    print *, "t = ", t, "storm%t = ", storm%t
+                    alpha = 0
+                else
+                    alpha = (t-storm%t_prev) / (storm%t_next-storm%t_prev)
+                endif
                 ! Estimate location index of storm center at time t
                 eye = storm%eye_prev + NINT((storm%eye_next - storm%eye_prev) * alpha)
             endif
@@ -470,8 +488,8 @@ contains
         call read_wrf_storm_file(data_path,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
-            !storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
-            storm%p_next = 101.3d3 ! workaround 
+            storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
+            !storm%p_next = 101.3d3 ! workaround 
             !if (DEBUG) print *, "ambient pressure = ", storm%ambient_pressure
             !if (DEBUG) print *, "shape(p_next) = ", shape(storm%p_next) 
             !if (DEBUG) print *, "shape(ambient_pressure) = ", shape(storm%ambient_pressure) 
@@ -560,15 +578,45 @@ contains
     ! ==========================================================================
     !  storm_interpolate()
     !  Determines intermediate storm values
-    !   for time t between t_prev and t_next
-    !   based on simple weighted average.
-    !  Not used in favor of the improved storm_shift_interp()
+    !   for time t between t_prev and t_next.
+    !  If distinct storms are present at both times,
+    !   the storm centers are shifted to an intermediate point
+    !   and a weighted average is taken.
+    !  Otherwise, no shift occurs and the
+    !   weighted average is performed in place.
     ! ==========================================================================
     subroutine storm_interpolate(storm)
 
         implicit none
 
-        ! Storm description, need in out here since will update the storm
+        ! Storm description, need "in out" here since will update the storm
+        ! values at time t
+        type(wrf_storm_type), intent(in out) :: storm
+
+        ! Check if there are distinct storm "eyes"
+        ! If not, interpolate wind & pressure fields in place.
+        ! If so, spatially shift storm snapshots then interpolate. 
+        if (storm%eye_prev(1) == 0 .or. storm%eye_next(1) == 0) then
+            call storm_inplace_interpolate(storm)
+        else
+            call storm_shift_interpolate(storm)
+            ! Optional: no weighted average, only shift prev snapshot in space
+            !call storm_shift_only(storm)
+        endif
+
+    end subroutine storm_interpolate
+
+    ! ==========================================================================
+    !  storm_inplace_interpolate()
+    !  Determines intermediate storm values
+    !   for time t between t_prev and t_next
+    !   based on simple weighted average.
+    ! ==========================================================================
+    subroutine storm_inplace_interpolate(storm)
+
+        implicit none
+
+        ! Storm description, need "in out" here since will update the storm
         ! values at time t
         type(wrf_storm_type), intent(in out) :: storm
 
@@ -579,7 +627,7 @@ contains
         ! Note that this might not be the best approach:
         !  intensity is smoothed out between intervals
         !  so intermediate values may appear less intense
-        ! For a more realistic storm field, use storm_shift_interp()
+        ! For a more realistic storm field, use storm_shift_interpolate()
 
         ! Determine the linear interpolation parameter (in time)
         alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
@@ -592,19 +640,19 @@ contains
         storm%p = storm%p_prev + &
                 (storm%p_next - storm%p_prev) * alpha
 
-    end subroutine storm_interpolate
+    end subroutine storm_inplace_interpolate
 
     ! ==========================================================================
-    !  storm_shift_interp()
+    !  storm_shift_interpolate()
     !  Determines intermediate storm values
     !   for time t between t_prev and t_next
     !   both in time (linearly) and in space (approximate) 
     ! ==========================================================================
-    subroutine storm_shift_interp(storm)
+    subroutine storm_shift_interpolate(storm)
 
         implicit none
 
-        ! Storm description, need in out here since will update the storm
+        ! Storm description, need "in out" here since will update the storm
         ! values at time t
         type(wrf_storm_type), intent(in out) :: storm
 
@@ -627,12 +675,12 @@ contains
         !  storm center and use time-weighted average of their values.
         do j = 1,storm%num_lats
             ! If index would be out of bounds, use edge value
-            pj = MIN(MAX(j-prev_shift(2),1),storm%num_lats)
-            nj = MIN(MAX(j-next_shift(2),1),storm%num_lats)
+            pj = MIN(MAX(1,j-prev_shift(2)),storm%num_lats)
+            nj = MIN(MAX(1,j-next_shift(2)),storm%num_lats)
             do i = 1,storm%num_lons
                 ! If index would be out of bounds, use edge value
-                pi = MIN(MAX(i-prev_shift(1),1),storm%num_lons)
-                ni = MIN(MAX(i-next_shift(1),1),storm%num_lons)
+                pi = MIN(MAX(1,i-prev_shift(1)),storm%num_lons)
+                ni = MIN(MAX(1,i-next_shift(1)),storm%num_lons)
                 ! Perform shift & interpolate
                 storm%u(i,j) = storm%u_prev(pi,pj) + &
                     (storm%u_next(ni,nj)-storm%u_prev(pi,pj)) * alpha
@@ -644,7 +692,53 @@ contains
         enddo
                 
 
-    end subroutine storm_shift_interp
+    end subroutine storm_shift_interpolate
+
+    ! ==========================================================================
+    !  storm_shift_only()
+    !  Determines intermediate storm values
+    !   for time t between t_prev and t_next
+    !   by shifting storm data towards next position
+    !  By not taking averages, this preserves large values
+    ! ==========================================================================
+    subroutine storm_shift_only(storm)
+
+        implicit none
+
+        ! Storm description, need "in out" here since will update the storm
+        ! values at time t
+        type(wrf_storm_type), intent(in out) :: storm
+
+        ! Local storage
+        real(kind=8) :: alpha
+        integer :: i,j
+        integer :: pi,pj
+        integer :: prev_shift(2)
+
+        ! Determine the linear interpolation parameter (in time)
+        alpha = (storm%t-storm%t_prev) / (storm%t_next-storm%t_prev)
+
+        ! Estimate relative location of storm center at time t
+        ! Note: The spatial grid is constant in time
+        !  so we don't translate to lat-long
+        prev_shift = NINT((storm%eye_next - storm%eye_prev) * alpha)
+
+        ! Now shift the earlier storm field
+        !  onto the intermediate storm center
+        do j = 1,storm%num_lats
+            ! If index would be out of bounds, use edge value
+            pj = MIN(MAX(1,j-prev_shift(2)),storm%num_lats)
+            do i = 1,storm%num_lons
+                ! If index would be out of bounds, use edge value
+                pi = MIN(MAX(1,i-prev_shift(1)),storm%num_lons)
+                ! Perform shift
+                storm%u(i,j) = storm%u_prev(pi,pj)
+                storm%v(i,j) = storm%v_prev(pi,pj)
+                storm%p(i,j) = storm%p_prev(pi,pj)
+            enddo
+        enddo
+                
+    end subroutine storm_shift_only
 
     ! ==========================================================================
     !  set_wrf_storm_fields()
@@ -659,7 +753,7 @@ contains
         integer, intent(in) :: maux,mbc,mx,my
         real(kind=8), intent(in) :: xlower,ylower,dx,dy,t
 
-        ! Storm description, need in out here since we may update the storm
+        ! Storm description, need "in out" here since we may update the storm
         ! if at next time point
         type(wrf_storm_type), intent(in out) :: storm
 
@@ -672,7 +766,8 @@ contains
         integer :: i,j,k,l
 
         if (t < storm%t_prev - eps) then
-            print *, "Simulation time precedes storm data in memory."
+            print *, "Simulation time precedes storm data in memory. &
+                        Race condition?"
             print *, "t=",t,"< t_prev=",storm%t_prev,"t_next=",storm%t_next
         endif
 
@@ -681,8 +776,10 @@ contains
             !$OMP CRITICAL (READ_STORM)
             do while (t > storm%t_next + eps)
             ! update all storm data, including value of t_next
-                if (DEBUG) print *,"loading new storm snapshot ","t=",t,"t_next=",storm%t_next
+                if (DEBUG) print *,"loading new storm snapshot ",&
+                                    "t=",t,"old t_next=",storm%t_next
                 call read_wrf_storm(storm,t)
+                if (DEBUG) print *,"new t_next=",storm%t_next
                 ! If storm data ends, the final storm state is used.
             enddo
             !$OMP END CRITICAL (READ_STORM)
@@ -693,14 +790,9 @@ contains
         if (t > storm%t + eps) then
             !$OMP CRITICAL (INTERP_STORM)
             if (t > storm%t + eps) then
-                ! Check to see if there's actually a storm. 
-                ! If not, interpolate in place.
-                ! If so, shift storm snapshots then interpolate. 
-                if (storm%eye_prev(1) == 0 .or. storm%eye_next(1) == 0) then
-                    call storm_interpolate(storm)
-                else
-                    call storm_shift_interp(storm)
-                endif
+                ! Update storm data by interpolation
+                call storm_interpolate(storm)
+                ! Update current time in storm module (race condition?)
                 storm%t = t
             endif
             !$OMP END CRITICAL (INTERP_STORM)
