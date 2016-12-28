@@ -124,6 +124,10 @@ contains
                     wind_drag => garret_wind_drag
                 case(2)
                     wind_drag => powell_wind_drag
+                case(3)
+                    wind_drag => mk_wind_drag
+                case(4)
+                    wind_drag => mk_nolimit_wind_drag
                 case default
                     stop "*** ERROR *** Invalid wind drag law."
             end select
@@ -323,6 +327,50 @@ contains
     
     end function garret_wind_drag
 
+    ! ========================
+    !  Mitsuyasu & Kusaba Wind Drag Coefficient
+    ! ========================
+    ! For reference see:
+    !  Mitsuyasu, H., and Kusaba, T (1984). "Drag coefficient over water surface under the
+    !  action of strong wind" Natural Disaster Science 6(2), 43-50. 
+    real(kind=8) pure function mk_wind_drag(wind_speed, theta) result(wind_drag)
+    
+        implicit none
+        
+        ! Input
+        real(kind=8), intent(in) :: wind_speed, theta
+  
+        if (wind_speed < 8d0) then ! 0 <= W < 8
+            wind_drag = (1.290d0 - 0.024d0 * wind_speed) * 1d-3
+        else if (wind_speed < 30d0) then ! 8 <= W < 30
+            wind_drag = (0.581d0 + 0.063d0 * wind_speed) * 1d-3
+        else ! W >= 30
+            wind_drag = (0.581d0 + 0.063d0 * 30d0) * 1d-3
+        endif
+    
+    end function mk_wind_drag
+
+    ! ========================
+    !  Mitsuyasu & Kusaba No-Limit Wind Drag Coefficient
+    ! ========================
+    ! Same as above but without the upper limit 
+    ! For reference see:
+    !  Mitsuyasu, H., and Kusaba, T (1984). "Drag coefficient over water surface under the
+    !  action of strong wind" Natural Disaster Science 6(2), 43-50. 
+    real(kind=8) pure function mk_nolimit_wind_drag(wind_speed, theta) result(wind_drag)
+    
+        implicit none
+        
+        ! Input
+        real(kind=8), intent(in) :: wind_speed, theta
+  
+        if (wind_speed < 8d0) then
+            wind_drag = (1.290d0 - 0.024d0 * wind_speed) * 1d-3
+        else
+            wind_drag = (0.581d0 + 0.063d0 * wind_speed) * 1d-3
+        endif
+    
+    end function mk_nolimit_wind_drag
 
     ! ==================================================================
     !  No Wind Drag - Dummy function used to turn off wind drag forcing
@@ -449,3 +497,4 @@ contains
     end subroutine output_storm_location
 
 end module storm_module
+
