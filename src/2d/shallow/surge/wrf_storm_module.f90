@@ -201,12 +201,6 @@ contains
         read (l_file, *, iostat=io_status) storm%lon
         close(l_file)
 
-        ! TEMPORARY
-        ! want to shift the storm to match BT data
-        !storm%lat = storm%lat + 0.3
-        storm%lat = storm%lat + 0.2
-        storm%lon = storm%lon + 0.15
-
         ! This is used to speed up searching for correct storm data
         !  (using ASCII datafiles)
         storm%last_storm_index = 0
@@ -812,8 +806,6 @@ contains
                 ! Set pressure field
                 aux(pressure_index,i,j) = storm%p(l,k)
                 ! Set velocity components of storm 
-                !aux(wind_index,i,j)   = storm%u(l,k) * 1.38 ! TEMPORARY!
-                !aux(wind_index+1,i,j) = storm%v(l,k) * 1.38 ! TEMPORARY!
                 aux(wind_index,i,j)   = storm%u(l,k)
                 aux(wind_index+1,i,j) = storm%v(l,k)
             enddo
