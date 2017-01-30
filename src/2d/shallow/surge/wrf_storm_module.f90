@@ -201,6 +201,15 @@ contains
         read (l_file, *, iostat=io_status) storm%lon
         close(l_file)
 
+<<<<<<< HEAD
+=======
+        ! TEMPORARY
+        ! want to shift the storm to match BT data
+        !storm%lat = storm%lat + 0.3
+        storm%lat = storm%lat + 0.2
+        storm%lon = storm%lon + 0.15
+
+>>>>>>> origin/master
         ! This is used to speed up searching for correct storm data
         !  (using ASCII datafiles)
         storm%last_storm_index = 0
