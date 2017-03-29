@@ -74,8 +74,8 @@ module wrf_storm_module
     end type wrf_storm_type
 
     ! Internal tracking variables for storm
-    logical, private :: DEBUG = .true. 
-    !logical, private :: DEBUG = .false. 
+    !logical, private :: DEBUG = .true. 
+    logical, private :: DEBUG = .false. 
 
     ! Tolerance for floating point inequalities
     real(kind=8), parameter :: eps = 1.0e-8 
@@ -201,11 +201,9 @@ contains
         read (l_file, *, iostat=io_status) storm%lon
         close(l_file)
 
-        ! TEMPORARY
-        ! want to shift the storm to match BT data
-        !storm%lat = storm%lat + 0.3
-        storm%lat = storm%lat + 0.2
-        storm%lon = storm%lon + 0.15
+        ! In case you want to shift the storm track
+        !storm%lat = storm%lat + 0.15
+        !storm%lon = storm%lon + 0.00
 
         ! This is used to speed up searching for correct storm data
         !  (using ASCII datafiles)
@@ -371,6 +369,8 @@ contains
     !  read_wrf_storm_data_file()
     !    Opens storm data file and reads next storm entry
     !    Currently only for ASCII file
+    !  This file will probably need to be modified
+    !   to suit the input dataset format.
     ! ==========================================================================
     subroutine read_wrf_storm_file(data_path,storm_array,num_lats,last_storm_index,timestamp)
 
@@ -487,8 +487,13 @@ contains
         call read_wrf_storm_file(data_path,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
+<<<<<<< Updated upstream
             !storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
             storm%p_next = 101.3d3 ! workaround 
+=======
+            storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
+            !storm%p_next = 101.3d3 ! workaround 
+>>>>>>> Stashed changes
             storm%eye_next = [0,0]
         else
             ! Convert pressure units: mbar to Pa
