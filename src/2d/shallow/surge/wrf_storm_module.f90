@@ -532,7 +532,7 @@ contains
             i = storm%num_lats
         else
             ! Find spacing between latitude values
-            dy = (storm%lat(storm%num_lats) - storm%lat(1)) / storm%num_lats
+            dy = (storm%lat(storm%num_lats) - storm%lat(1)) / (storm%num_lats-1)
             ! Determine index based on spacing
             i = 1 + (lat - storm%lat(1)) / dy
         endif
@@ -562,7 +562,7 @@ contains
             i = storm%num_lons
         else
             ! Find spacing between longitude values
-            dx = (storm%lon(storm%num_lons) - storm%lon(1)) / storm%num_lons
+            dx = (storm%lon(storm%num_lons) - storm%lon(1)) / (storm%num_lons-1)
             ! Determine index based on spacing
             i = 1 + (lon - storm%lon(1)) / dx
         endif
@@ -618,7 +618,7 @@ contains
         real(kind=8) :: alpha
 
         ! This is just a simple weighted average.
-        ! Note that this might not be the best approach:
+        ! Note that this a poor approach for a tropical cyclone:
         !  intensity is smoothed out between intervals
         !  so intermediate values may appear less intense
         ! For a more realistic storm field, use storm_shift_interpolate()

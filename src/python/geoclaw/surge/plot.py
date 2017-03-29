@@ -12,6 +12,8 @@ Plotting routines for storm surge simulations with GeoClaw
 #                     http://www.opensource.org/licenses/
 # ==============================================================================
 
+from __future__ import absolute_import
+from __future__ import print_function
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
@@ -64,7 +66,7 @@ class track_data(object):
 
             # Check to make sure that this fixed the problem
             if self._data.shape[0] < frame + 1:
-                print " *** WARNING *** Could not find track data for frame %s." % frame
+                print(" *** WARNING *** Could not find track data for frame %s." % frame)
                 return None, None, None
                 # raise Exception("Could not find data for frame %s." % frame)
 
@@ -414,7 +416,7 @@ def add_friction(plotaxes,bounds=None,plot_type='pcolor',shrink=1.0):
 
 def add_wind(plotaxes,bounds=None,plot_type='pcolor',shrink=1.0):
     if plot_type == 'pcolor' or plot_type == 'imshow':
-        plotitem = plotaxes.new_plotitem(plot_type='2d_pcolor')
+        plotitem = plotaxes.new_plotitem(name="wind", plot_type='2d_pcolor')
         plotitem.plot_var = wind_speed
         plotitem.pcolor_cmap = plt.get_cmap('PuBu')
         if bounds is not None:
