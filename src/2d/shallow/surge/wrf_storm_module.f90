@@ -487,13 +487,8 @@ contains
         call read_wrf_storm_file(data_path,storm%p_next,storm%num_lats,storm%last_storm_index,timestamp)
         ! Error handling: set to clear skies if file ended
         if (timestamp == -1) then
-<<<<<<< Updated upstream
             !storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
             storm%p_next = 101.3d3 ! workaround 
-=======
-            storm%p_next = storm%ambient_pressure ! causes SIGSEGV - module init not threadsafe?
-            !storm%p_next = 101.3d3 ! workaround 
->>>>>>> Stashed changes
             storm%eye_next = [0,0]
         else
             ! Convert pressure units: mbar to Pa
